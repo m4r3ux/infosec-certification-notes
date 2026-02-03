@@ -14,7 +14,7 @@ Já nos Estados Unidos, temos a GDPR.
 
 ## Gerenciamento de Risco Estratégico
 
-O nível de quanta cybersegurança precisamos é decidido pelo nível de riscos que temos na empresa e operação.
+O nível de quanta cibersegurança precisamos é decidido pelo nível de riscos que temos na empresa e operação.
 
 Assim que validarmos esse risco, nós implementamos controles de segurança para mitigar o risco ao nível que acharmos aceitável.
 
@@ -61,4 +61,32 @@ HIPAA - Como as informações de privacidade da área de saúde devem ser mantid
 UE - GDPR - Da controle a qualquer um dentro da união europeia a suas informações.
 
 Temos que ficar atentos as políticas de privacidade do nosso país, e se estivermos trabalhando para um país de fora, estudar suas devidas políticas para se enquadrar e não quebrar nenhuma regra.
+
+---
+
+## Identificação de riscos
+
+Precisamos ficar espertos  sobre riscos - não só os obvios mas também se antever a possíveis riscos, como um ataque zero-day, um exploit comum em uma línguagem ou sistema que usamos. 
+
+É a nossa obrigação como profissionais de cibersegurança, manter todos os envolvidos cientes sobre identificação de riscos, etc.
+
+Precisamos sempre estar ativos e proativos, buscando por riscos, identificando-os, e caracterizando-os.
+
+---
+
+## Autenticação
+
+Depois que os usuários declararam sua identificação, precisamos garantir que aquela pessoa realmente se trata de quem declarou ser, esse processo de verificar a identificação do usuário é chamado de autenticação.
+
+Simples, mas muito importante.
+
+Temos três maneiras comuns de autenticação:
+
+- Algo que você sabe: senhas ou frases-chave.
+- Algo que você tem: tokens, cartão de memória, cartão inteligente.
+- Algo que você é: biometria, características mensuráveis
+
+---
+
+## Elementos da Governança
 
