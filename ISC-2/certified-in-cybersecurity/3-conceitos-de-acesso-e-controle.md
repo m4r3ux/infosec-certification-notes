@@ -113,3 +113,29 @@ Eles determinam quem pode acessar recursos digitais, mesmo que a pessoa já poss
 Esses mecanismos funcionam como uma camada adicional de proteção, garantindo que apenas usuários autorizados tenham acesso lógico aos ativos da organização.
 
 ---
+
+## Controls and Risks
+
+Controles são mecanismos utilizados para **reduzir riscos** a um nível aceitável, de acordo com a tolerância ao risco de uma pessoa ou organização.
+
+### Tipos de controles
+
+- **Controle físico**: mecanismo tangível ou ação concreta.  
+  - Exemplo: cinto de segurança.  
+  - Exemplo: fixar uma estante na parede.
+
+- **Controle administrativo**: leis, normas, políticas ou regulamentos.  
+  - Exemplo: lei que obriga o uso do cinto de segurança.  
+  - Exemplo: código de construção que exige a fixação de estantes.
+
+### Funcionamento conjunto
+
+Controles administrativos e físicos atuam em conjunto para mitigar riscos.
+
+No exemplo da estante:
+
+- **Risco**: queda da estante e possível lesão.
+- **Controle administrativo**: exigência legal de fixação.
+- **Controle físico**: suporte ou braçadeira prendendo a estante à parede.
+
+Um controle tem como objetivo reduzir o risco para dentro da tolerância aceitável, não necessariamente eliminá-lo completamente.
