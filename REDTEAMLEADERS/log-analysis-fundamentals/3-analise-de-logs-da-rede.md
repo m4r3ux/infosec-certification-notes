@@ -1176,92 +1176,490 @@ Padroes suspeitos:
 
 Aqui o risco e alto mesmo com poucos eventos.
 
+---
 
+## Fundamentos de Análise de Log: Pivotando em Fontes de Log
 
-# Correlacao e visao unificada
+* **Conceito de Pivotagem:** Técnica de investigação que utiliza um dado inicial (IP, Hash, User) para rastrear atividades em diferentes fontes de logs, conectando estágios de um ataque (C2, Movimentação Lateral, Exfiltração).
 
-Logs de autenticacao fazem sentido quando conectados:
+### Principais Fontes e Elementos de Pivô
+| Fonte | Elementos-Chave para Conexão |
+| :--- | :--- |
+| **DNS** | Domínios consultados e IPs de clientes. |
+| **Proxy** | URLs, Métodos (GET/POST) e User-Agents. |
+| **EDR** | Hashes de arquivos e Árvore de Processos (Pai-Filho). |
+| **Autenticação** | Usernames, Logon Types (Ex: Tipo 10 - RDP) e IPs de origem. |
+| **Firewall** | IPs de Origem/Destino e Portas de comunicação. |
 
-entrada → acesso → privilegio → movimento
+### Fluxos de Investigação (Exemplos Práticos)
+* **Domínio Suspeito via DNS:**
+    1.  **Proxy:** Confirmar comportamento (GET/POST) e anomalias de User-Agent.
+    2.  **EDR:** Identificar qual processo (ex: `powershell.exe`) disparou a consulta.
+    3.  **Autenticação:** Identificar o usuário logado no host no momento do evento.
+* **Execução Suspeita (PowerShell):**
+    1.  **Árvore de Processo:** Verificar se o pai foi um binário inesperado (ex: `winword.exe`).
+    2.  **Telemetria EDR:** Buscar por arquivos criados ou tarefas agendadas (`Persistence`).
+    3.  **Rede:** Verificar conexões de saída imediatas após a execução.
 
-Exemplo completo de ataque:
+### Técnicas de Pivotagem por Atributo
+* **Baseada em IP:** Rastreia comunicações no Firewall/Proxy e busca resoluções DNS reversas.
+* **Baseada em Hash:** Localiza a propagação de um arquivo malicioso (DLL/EXE) em todos os endpoints da rede.
+* **Baseada em Usuário:** Monitora escalada de privilégios e logins simultâneos em múltiplos sistemas.
+* **Comportamento de Beacon:** Identifica padrões temporais de saída no Proxy correlacionando com processos no EDR.
 
-- 4625 (falhas)
-- 4624 (sucesso)
-- 4672 (privilegios)
-- 4688 (execucao de comando)
-- multiplos logons em outros hosts
+### Consultas e Regras Técnicas
+* **Splunk (SPL):** `index=proxy OR index=firewall | search src_ip="10.10.5.12" | stats values(uri) by src_ip, user`
+* **Sigma (Lógica):** Detectar `powershell.exe` seguido de resolução DNS de domínio suspeito em um intervalo de 5 minutos.
 
-Separados, parecem eventos comuns  
-juntos, contam uma invasao completa
+### Erros Críticos na Análise
+* **Ignorar Timestamps:** Correlacionar eventos de tempos distintos gera falsos positivos.
+* **Desconsiderar NAT:** IPs de origem podem ser mascarados por proxies, levando a atribuições erradas.
+* **Falha em Sessões:** Não rastrear IDs de sessão em sistemas multiusuário quebra a linha do tempo.
+* **Negligenciar Falhas de Login:** Ignorar `Logon Failures` esconde ataques de Brute Force ou Password Spraying.
 
+---
 
+## 4.3 Construção de Playbooks de Threat Hunting Baseados em Hipóteses
 
-# SIEM e deteccao baseada em identidade
-
-Quando esses logs vao para SIEM, viram dados estruturados:
-
-- user.name
-- source.ip
-- event.outcome
-- logon.type
-
-Isso permite deteccoes como:
-
-- muitas falhas por usuario
-- login de IP externo
-- acesso fora do horario
-- mesmo usuario em varios hosts
-
-Sem normalizacao, nao existe correlacao real.
-
-
-
-# Threat hunting focado em autenticacao
-
-Algumas abordagens praticas:
-
-Brute force:
-muitas falhas em pouco tempo
-
-Credential stuffing:
-varios IPs tentando mesma conta
-
-Movimento lateral:
-mesmo usuario em varios hosts
-
-Escalada:
-login seguido de privilegio elevado
-
-Conta comprometida:
-login fora de padrao + sucesso
-
-O diferencial aqui e buscar comportamento, nao alerta pronto.
+* **Definição:** O *Threat Hunting* é uma atividade proativa e orientada por inteligência. Diferente da triagem de alertas (reativa), ele busca comportamentos adversários que evadem detecções baseadas em assinaturas.
+* **Playbook de Caça:** Um processo documentado, repetível e estruturado que transforma uma suposição teórica em uma investigação prática.
 
 
 
-# Pensamento operacional
+### A Hipótese de Caça
+Uma hipótese é uma declaração testável sobre uma técnica ou comportamento atacante no ambiente.
+* **Exemplos:** * "Um adversário estabeleceu persistência via tarefas agendadas."
+    * "Há tráfego de *beaconing* via HTTP a cada 60 segundos."
+* **Fontes para Hipóteses:** MITRE ATT&CK (ex: T1053), Threat Intelligence (IoCs/TTPs de grupos específicos), Lacunas de Detecção (ex: falta de alertas para LOLBins) e Desvios de Linha de Base (Spikes de autenticação).
 
-Autenticacao conta a historia da identidade no ambiente:
+### Estrutura Passo a Passo do Playbook
 
-tentativa → validacao → acesso → privilegio → expansao
+| Etapa | Ação Técnica |
+| :--- | :--- |
+| **1. Definir Hipótese** | Ex: Persistência via `schtasks.exe` em endpoints com logins VPN recentes. |
+| **2. Definir Objetivos** | Identificar criação manual de tarefas, vincular ao usuário e detectar execução. |
+| **3. Identificar Fontes** | Windows Event Logs (ID 4698), EDR (Pai-Filho), Logs de VPN e Proxy/DNS. |
+| **4. Criar Consultas** | **Splunk:** `index=windows EventCode=4698 CommandLine="*schtasks*"`<br>**KQL:** `event.action : "scheduled-task-created" AND process.name : "schtasks.exe"` |
+| **5. Correlação** | Vincular Login VPN (IP remoto) -> Criação de Tarefa (15 min) -> Execução (5 min). |
+| **6. Documentar** | Capturar hashes e comandos; converter em regra Sigma se o comportamento for confirmado. |
 
-O atacante precisa passar por essas etapas  
-e cada uma deixa rastro
+### Exemplo Prático: Exfiltração via PowerShell
+* **Hipótese:** "Host comprometido exfiltrando dados via PowerShell codificado sobre HTTP."
+* **Plano de Execução:**
+    1.  **Proxy:** Buscar POSTs grandes/frequentes para domínios desconhecidos.
+    2.  **User-Agent:** Filtrar por `Microsoft.PowerShell/5.1`.
+    3.  **EDR:** Pivotar para confirmar uso de `Invoke-WebRequest` ou `Invoke-Expression`.
+    4.  **Persistência:** Verificar tarefas agendadas ou WMI no mesmo host.
 
-O papel do analista e conectar esses rastros.
+### Modelo de Playbook (Template)
+```
+# Playbook: Beaconing via DNS
+- **Hipótese**: Adversários utilizam DNS para exfiltração ou C2.
+- **Técnicas ATT&CK**: T1048.003 (Exfiltration), T1071.004 (DNS).
+- **Logs Necessários**: DNS, EDR, Firewall.
+- **Queries**: Frequência alta para um único domínio; domínios com > 50 caracteres.
+- **Ações de Resposta**: Isolar host, extrair memória, bloquear domínio.
+```
+
+---
+
+## 4.4 Caça ao Movimento Lateral e Persistência
+
+* **Objetivo:** Detectar a progressão do atacante após o acesso inicial. O foco é identificar o salto entre sistemas (Movimento Lateral) e a criação de mecanismos de sobrevivência a reinicializações (Persistência).
+* **Desafio Técnico:** Diferenciar comandos administrativos legítimos de atividades maliciosas através da correlação de múltiplas camadas de logs.
 
 
 
-# Resumo mental
+### Técnicas Críticas e Identificadores (ATT&CK)
 
-Autenticacao = identidade em acao  
+| Categoria | Técnica | ID | Indicador de Log |
+| :--- | :--- | :--- | :--- |
+| **Movimento Lateral** | **RDP Interno** | T1021.001 | Event ID 4624 (Logon Type 10). |
+| | **Pass-the-Hash** | T1550.002 | Event ID 4624 (Logon Type 9 / Logon Process: Seclogo). |
+| | **SMB/PsExec** | T1569.002 | Event ID 7045 (Novo Serviço instalado: `PSEXECSVC`). |
+| | **WMIC** | T1047 | Processo `wmic.exe` com argumento `/node:`. |
+| **Persistência** | **Scheduled Tasks** | T1053 | Event ID 4698 (Criação) e 4699 (Deleção). |
+| | **Registry Run Keys** | T1547.001 | Sysmon Event ID 13 (RegistryValueset) em `...\Run` ou `...\RunOnce`. |
+| | **WMI Event Sub.** | T1546.003 | Sysmon Event ID 19, 20, 21 (WMIEvent). |
 
-Falhas repetidas = ataque em andamento  
-Sucesso apos falha = possivel comprometimento  
-Logon remoto inesperado = risco alto  
-Multiplos hosts = movimento lateral  
-Privilegio apos login = escalada  
+### Metodologia de Investigação e Correlação
 
-Logs de autenticacao nao mostram tudo  
-mas mostram quem esta controlando o ambientet
+Para uma caça eficiente, é necessário cruzar dados de diferentes fontes em uma janela temporal curta.
+
+#### Exemplo de Cadeia de Eventos (Pivô):
+1.  **Logon (Host A):** Sucesso de login via RDP (ID 4624, Type 10) vindo de um IP incomum.
+2.  **Execução (Host B):** Uso de `wmic.exe` para criar um processo em uma máquina alvo (`/node:10.0.4.15`).
+3.  **Persistência (Host B):** Criação imediata de uma tarefa agendada (ID 4698) executando um binário em `C:\Users\Public\`.
+
+
+
+### Consultas de Caça (Hunting Queries)
+
+* **Splunk - Anomalia Pai-Filho (Explorer disparando WMIC):**
+```splunk
+index=sysmon OR index=edr
+| transaction host startswith=(process_name="explorer.exe") endswith=(process_name="wmic.exe")
+| stats count by host, user, parent_process, child_process
+```
+---
+
+````
+## 4.5 Engenharia de Detecção: Sigma, KQL, SPL e Consultas Personalizadas
+
+* **Definição:** A Engenharia de Detecção é o processo de transformar inteligência de ameaças e hipóteses de caça em regras automatizadas. Ela preenche a lacuna entre o *Threat Hunting* proativo e a resposta a incidentes.
+* **Linguagens de Consulta:** Fluência em diferentes sintaxes (Sigma, KQL, SPL) permite que a Blue Team crie detecções portáteis e eficazes em diversos SIEMs e EDRs.
+
+
+
+### 1. Regras Sigma (O Padrão Genérico)
+O Sigma funciona como um "tradutor" universal para regras de detecção. Escrito em YAML, pode ser convertido para Splunk, Elastic, Sentinel, entre outros.
+
+**Exemplo: Execução de PowerShell Suspeito**
+```yaml
+title: Suspicious PowerShell Execution
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  selection:
+    Image|endswith: '\powershell.exe'
+    CommandLine|contains:
+      - ' -enc '
+      - ' -EncodedCommand '
+  condition: selection
+level: high
+````
+
+### 2. KQL (Microsoft Sentinel / Defender)
+
+Linguagem otimizada para logs de segurança da Microsoft e dados de séries temporais.
+
+**Exemplo: Detecção de Carga Útil Base64**
+
+Snippet de código
+
+```
+DeviceProcessEvents
+| where FileName =~ "powershell.exe"
+| where ProcessCommandLine has_any (" -enc ", " -EncodedCommand")
+| project Timestamp, DeviceName, InitiatingProcessAccountName, ProcessCommandLine
+```
+
+### 3. SPL (Splunk Search Processing Language)
+
+Utilizada para buscas rápidas e correlações complexas em ambientes Splunk.
+
+**Exemplo: Correlação de Tarefa Agendada + Execução (Janela de 15min)**
+
+Snippet de código
+
+```
+index=wineventlog EventCode=4698 OR EventCode=4688
+| eval type=case(EventCode==4698,"Created", EventCode==4688,"Exec")
+| transaction host startswith=(type="Created") endswith=(type="Exec") maxspan=15m
+| table _time, host, user, CommandLine, type
+```
+
+### 4. Mapeamento com Frameworks (MITRE ATT&CK)
+
+A detecção deve ser vinculada a Táticas, Técnicas e Procedimentos (TTPs) para garantir cobertura estratégica.
+
+|Técnica|Sigma (Lógica)|KQL (Tabela)|SPL (Índice)|
+|---|---|---|---|
+|**T1059 (Scripting)**|`category: process_creation`|`DeviceProcessEvents`|`index=sysmon`|
+|**T1569.002 (PsExec)**|`Image|endswith: 'psexec.exe'`|`where FileName == "psexec.exe"`|
+
+### Dicas para Engenharia de Detecção Eficaz
+
+- **Validação:** Teste as regras com ferramentas de simulação de ataque (ex: Atomic Red Team).
+    
+- **Fidelidade:** Priorize regras com baixo índice de falso positivo (alta fidelidade).
+    
+- **Métricas:** Marque cada regra com o ID da técnica MITRE correspondente.
+    
+- **Versionamento:** Utilize repositórios Git para controle de versão das regras de detecção.
+    
+
+### Resumo de Benefícios
+
+1. **Portabilidade:** Regras Sigma podem ser movidas entre diferentes plataformas.
+    
+2. **Precisão:** Consultas específicas reduzem a fadiga de alertas.
+    
+3. **Agilidade:** Acelera a resposta a incidentes com alertas contextuais e precisos.
+
+---
+
+## 4.6 Integrando Inteligência de Ameaças (TI) em Correlação
+
+* **Conceito:** A Inteligência de Ameaças (Threat Intelligence) fornece o "porquê" por trás dos dados dos logs. Ela enriquece os eventos com contexto externo (IOCs e TTPs), permitindo priorização e resposta acelerada.
+* **Objetivo:** Reduzir o *Dwell Time* (tempo de permanência do invasor) e guiar caçadas proativas baseadas em infraestrutura adversária conhecida.
+
+
+
+### Categorias de Inteligência de Ameaças
+
+| Tipo | Foco Técnico | Aplicabilidade em Logs |
+| :--- | :--- | :--- |
+| **Tática (IOCs)** | IPs, Hashes, Domínios, User-Agents. | Correspondência direta em tempo real (SIEM). |
+| **Operacional** | TTPs, Campanhas, Famílias de Malware. | Guia para Playbooks de Hunting. |
+| **Estratégica** | Tendências de atores e motivações. | Planejamento de longo prazo e governança. |
+| **Técnica** | Artefatos de engenharia reversa. | Detecção de beacons e padrões de rede. |
+
+### Fontes e Tipos de Indicadores (IOCs)
+
+* **Fontes:** Open Source (Abuse.ch, AlienVault OTX), Comerciais (Recorded Future), Internas (Incidentes passados) e ISACs (Setoriais).
+* **Mapeamento de Logs:**
+    * **IPs:** Firewall, Proxy, NetFlow.
+    * **Domínios/URLs:** DNS, Web Proxy.
+    * **Hashes/Nomes de Arquivo:** EDR, Sysmon, AV.
+
+### Técnicas de Integração e Correlação
+
+#### 1. IOC Matching (Tempo Real)
+O SIEM cruza logs de entrada com feeds de inteligência automaticamente.
+
+* **KQL (Sentinel):**
+```kql
+let bad_ips = externaldata(ip:string) [@"[https://threatfeed.io/badips.csv](https://threatfeed.io/badips.csv)"];
+DeviceNetworkEvents
+| where RemoteIP in (bad_ips)
+
+    Splunk (ThreatMatch):
+
+Snippet de código
+
+index=proxy_logs
+| lookup ti_bad_ips_lookup RemoteIP as dest_ip OUTPUT threat_info
+| where isnotnull(threat_info)
+
+2. Enriquecimento de Alertas
+
+Adiciona metadados ao alerta disparado para facilitar a triagem.
+
+    Exemplo: Um alerta de DNS para um domínio suspeito é enriquecido com: “Domínio C2 vinculado ao APT37 (AsyncRAT), ativo desde Nov/2023.”
+
+3. Hunting Orientado por TI
+
+Utiliza relatórios de campanhas (ex: TA551/Ursnif) para buscar comportamentos específicos, como documentos Office disparando cmd.exe ou powershell.exe.
+Ferramentas de Suporte
+
+    MISP (Open Source): Plataforma para compartilhamento e gerenciamento de IOCs.
+
+    OpenCTI: Analisa relações entre ameaças e indicadores.
+
+    SOAR: Automatiza o enriquecimento de alertas durante a execução de playbooks.
+
+Melhores Práticas
+
+    Qualidade vs. Quantidade: Feeds ruidosos geram fadiga de alertas; valide a fidelidade da fonte.
+
+    Pontuação de Confiança: Use níveis de confiança para decidir se um alerta deve ser crítico ou apenas informativo.
+
+    Normalização: Garanta que os logs e os feeds de TI usem o mesmo formato (ex: hashes em SHA256) para evitar falhas na correlação.
+```
+
+---
+
+## Aula 01: Introdução ao SIEM e ELK Stack
+
+* **SIEM (Security Information and Event Management):** Uma solução que combina **SIM** (armazenamento e análise de longo prazo) e **SEM** (monitoramento e correlação em tempo real).
+* **Objetivo:** Centralizar logs, normalizar dados e gerar alertas proativos sobre incidentes de segurança.
+
+
+
+### A Stack ELK (Elasticsearch, Logstash, Kibana)
+O ELK é uma plataforma de gerenciamento de logs composta por três pilares, frequentemente alimentada por **Beats** (agentes coletores).
+
+| Componente | Função Principal | Analogia |
+| :--- | :--- | :--- |
+| **Beats** | Coletores leves (Filebeat, Winlogbeat) instalados na origem. | O Mensageiro. |
+| **Logstash** | Processamento, filtragem e enriquecimento de dados. | A Refinaria. |
+| **Elasticsearch** | Motor de busca e indexação distribuída (JSON). | O Cérebro/Arquivo. |
+| **Kibana** | Interface de visualização, dashboards e alertas. | O Painel de Controle. |
+
+
+
+### Conceitos Chave do Elasticsearch
+* **Index:** Coleção de documentos com características similares (ex: `firewall-logs-*`).
+* **Document:** A unidade básica de informação em formato JSON.
+* **Shard/Replica:** **Shard** é a subdivisão do índice para ganho de performance; **Replica** é a cópia para redundância e alta disponibilidade.
+
+### Logstash: O Pipeline de Dados
+O processamento ocorre em três etapas dentro do arquivo de configuração:
+1.  **Input:** De onde os dados vêm (ex: porta 5044 para Beats).
+2.  **Filter:** Onde a mágica acontece (Grok para parsear texto, GeoIP para localizar IPs).
+3.  **Output:** Para onde os dados vão (geralmente para o Elasticsearch).
+
+### ECS (Elastic Common Schema)
+O **ECS** é uma especificação que padroniza os nomes dos campos.
+* **Por que usar?** Garante que logs de um firewall Cisco e de um Windows Event Log usem os mesmos campos (ex: `source.ip`), permitindo que um único dashboard visualize ambos simultaneamente.
+
+
+
+### Fontes de Dados Críticas
+
+| Categoria | Exemplo de Fonte | Valor para Segurança |
+| :--- | :--- | :--- |
+| **Rede** | Firewall, IDS/IPS, DNS. | Detecção de C2 e exfiltração. |
+| **Endpoint** | Sysmon, WinEventLog, Auditd. | Movimentação lateral e execução de malware. |
+| **Aplicação** | Web Server Logs (Nginx/Apache). | Ataques de SQLi e XSS. |
+| **Nuvem** | CloudTrail (AWS), Activity Logs. | Acesso não autorizado a APIs. |
+
+### Exercício de Fluxo: Ataque Brute Force SSH
+1.  **Source:** O servidor registra falhas de login no `/var/log/auth.log`.
+2.  **Filebeat:** Lê o arquivo e envia para o Logstash.
+3.  **Logstash:** Extrai o IP de origem, aplica GeoIP (identifica a origem na China) e marca o evento como `event.outcome: failure`.
+4.  **Elasticsearch:** Armazena o JSON indexado.
+5.  **Kibana:** O analista visualiza um pico de falhas no dashboard e o alerta de SIEM é disparado.
+
+---
+
+### Perguntas de Revisão
+1.  **Quais os 3 componentes do ELK e seus papéis?** (E: Busca, L: Processamento, K: Visualização).
+2.  **Por que normalizar logs?** Para permitir buscas e correlações uniformes entre fontes diferentes.
+3.  **Qual a diferença entre Shard e Replica?** Shard divide o dado para velocidade; Replica copia o dado para segurança.
+
+---
+
+## Lição 03: Investigação de Incidentes e Fluxos de Trabalho no ELK
+
+* **Objetivo:** Transformar dados brutos em uma linha do tempo de ataque (Kill Chain). A investigação no ELK foca em correlação de eventos, análise de comportamento e isolamento de indicadores (IOCs).
+* **Fluxo de Trabalho:** Inicia na detecção (Alerta), passa pela análise ad-hoc (Discover) e termina na visualização do impacto (Dashboards/Timeline).
+
+
+
+### 1. Análise de Linha do Tempo (Timeline)
+A investigação eficaz reconstrói os passos do atacante cronologicamente. No Kibana, o campo `@timestamp` é o eixo principal.
+
+**Passos para Investigação de Endpoint:**
+1.  **Identificar o Alerta:** Ex: Execução de `powershell.exe` com comando codificado.
+2.  **Filtrar por Host e Usuário:** `host.name: "WIN-01" AND user.name: "suporte"`.
+3.  **Expandir a Janela de Tempo:** Olhar 5 minutos antes e depois do evento para identificar o "Pai" do processo.
+4.  **Verificar Conexões de Rede:** `process.name: "powershell.exe" AND event.category: "network"`.
+
+### 2. Correlação de Eventos entre Fontes
+A força do SIEM está em unir logs de diferentes origens para confirmar uma suspeita.
+
+| Evento A (Network) | Evento B (Endpoint) | Conclusão |
+| :--- | :--- | :--- |
+| Conexão na porta 4444 (Firewall) | `nc.exe` em execução (Sysmon) | Possível Reverse Shell ativo. |
+| Pico de 404 Not Found (Proxy) | `dirbuster` ou `gobuster` (WAF) | Varredura de diretórios (Recon). |
+| Login VPN às 03:00 AM (VPN) | `mimikatz.exe` detectado (EDR) | Conta comprometida / Mov. Lateral. |
+
+
+
+### 3. Técnicas de Investigação Ad-Hoc (KQL/Lucene)
+
+#### Investigando Movimentação Lateral
+Para encontrar um atacante pulando de uma máquina para outra via RDP:
+* **KQL:** `event.code: 4624 AND winlog.logon.type: 10`
+* **Próximo Passo:** Filtrar pelo `source.ip` para ver quais outros hosts essa mesma conta acessou no mesmo período.
+
+#### Investigando Persistência
+Busca por modificações suspeitas em chaves de inicialização:
+* **KQL:** `registry.path: "*\\CurrentVersion\\Run*" AND NOT process.executable: "C:\\Program Files\\*"`
+* **Análise:** Qualquer binário executado fora de diretórios protegidos (ex: `\Temp\` ou `\Public\`) é altamente suspeito.
+
+### 4. Dashboards de Resposta a Incidentes
+Dashboards não são apenas para monitoramento, mas para triagem rápida durante um incidente.
+
+* **Filtros Globais:** Aplicar um filtro de IP suspeito no dashboard e ver instantaneamente todos os usuários e hosts associados.
+* **Visualizações Úteis:**
+    * **Sankey Diagrams:** Visualizar o fluxo de tráfego de rede (Origem -> Destino).
+    * **Heatmaps:** Identificar horários anômalos de login.
+
+
+
+### 5. Melhores Práticas de Investigação
+1.  **Preserve as Evidências:** Não altere o estado do host antes de coletar os logs necessários.
+2.  **Use o ECS:** Sempre utilize campos do *Elastic Common Schema* para que suas queries funcionem em qualquer log normalizado.
+3.  **Documente o Pivot:** Cada vez que você pular de um IP para um processo, ou de um processo para um arquivo, anote a relação.
+4.  **Crie Regras de Detecção:** Se uma investigação manual encontrou um ataque, transforme essa query em um alerta automático.
+
+---
+
+### Exercício de Laboratório: "O Usuário Curioso"
+**Cenário:** O EDR alertou sobre o uso de `certutil.exe` para baixar um arquivo.
+1.  **Busca:** `process.name: "certutil.exe" AND process.command_line: "*urlcache*"`
+2.  **Correlação:** Pegue o IP de destino no comando e pesquise nos logs de Firewall/Proxy.
+3.  **Impacto:** Verifique se esse IP está associado a algum feed de *Threat Intelligence* (Lição 4.6).
+
+---
+
+## 5.3 Investigando Incidentes de Segurança com ELK
+
+A investigação no ELK é um processo iterativo que transforma alertas isolados em uma narrativa completa de ataque. O objetivo é responder às perguntas fundamentais: **O que, Quem, Quando, Onde e Como.**
+
+### 1. Fluxo de Trabalho de Investigação (Workflow)
+
+Uma investigação estruturada segue quatro fases principais antes da documentação final:
+
+
+
+1.  **Detect (Detectar):** O gatilho inicial (Alerta de SIEM ou anomalia em dashboard).
+2.  **Triage (Triagem):** Validação da severidade e descarte de falsos positivos.
+3.  **Analyze (Analisar):** Expansão do escopo usando pivotação e correlação.
+4.  **Contain (Conter):** Ações imediatas como isolamento de host ou bloqueio de IPs.
+
+---
+
+### 2. Técnicas de Pivotação (Pivot Points)
+
+Pivotar é usar uma evidência confirmada para encontrar eventos relacionados em outras fontes de dados.
+
+| Ponto de Partida | Pivote Para... | Exemplo de Consulta (KQL) |
+| :--- | :--- | :--- |
+| **Endereço IP** | Sessões, DNS e Firewall | `source.ip: "10.0.0.6" OR destination.ip: "10.0.0.6"` |
+| **User Name** | Atividade total do usuário | `user.name: "admin"` |
+| **Processo** | Relação Pai/Filho | `process.parent.name: "cmd.exe"` |
+| **Hash de Arquivo** | Outros hosts afetados | `file.hash.sha256: "abc123..."` |
+
+
+
+---
+
+### 3. Análise de Linha do Tempo (Timeline)
+
+A construção da linha do tempo é essencial para entender a ordem dos eventos. No Kibana, isso é feito organizando os logs pelo campo `@timestamp`.
+
+**Exemplo de Cronologia de Ataque (Brute Force):**
+
+| Timestamp | Fonte | Evento | Detalhes |
+| :--- | :--- | :--- | :--- |
+| 10:08:00 | access.log | Web Scan | Busca por `/wp-login.php` (404) |
+| 10:15:10 | auth.log | SSH Fail | Falha de senha para usuário `admin` |
+| 10:15:20 | firewall.log | Blocked | Firewall bloqueia IP após múltiplas falhas |
+
+
+
+---
+
+### 4. Correlação Multi-Fonte
+
+A correlação conecta pontos entre diferentes camadas (Rede, Endpoint, Autenticação) para revelar a história completa.
+
+* **Cenário:** Um login bem-sucedido vindo de um IP que acabou de realizar um scan de portas.
+* **Lógica de Correlação:** `SAME IP + SAME TIME` entre `firewall.log` e `auth.log`.
+
+**Consulta de Agregação (DSL) para Correlação:**
+```json
+{
+  "aggs": {
+    "eventos_por_categoria": {
+      "terms": { "field": "event.category" },
+      "aggs": {
+        "acoes_detalhadas": {
+          "terms": { "field": "event.action" }
+        }
+      }
+    }
+  }
+}
+```
+
+
+
+
+
+
